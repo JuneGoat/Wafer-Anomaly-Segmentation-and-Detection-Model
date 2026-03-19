@@ -1,0 +1,51 @@
+seed: 0
+
+data:
+  root: "datasets"
+  input_type: "wafer_map"   # "image" or "wafer_map"
+  channels: 1
+  image_size: [256, 256]
+  mean: [0.5]
+  std: [0.5]
+  batch_size: 8
+  num_workers: 2
+
+model:
+  use_patchcore: true
+  use_autoencoder: true
+  weight_patchcore: 1.0
+  weight_recon: 1.0
+
+  backbone:
+    name: "resnet18"        # resnet18/resnet34/resnet50/wide_resnet50_2/vit_b_16
+    pretrained: false
+    out_layers: ["layer2", "layer3", "layer4"]
+
+  patchcore:
+    max_features: 200000
+    knn_k: 1
+    image_score_topk: 0.01
+    random_seed: 0
+
+  autoencoder:
+    base_channels: 64
+    num_down: 3
+
+train:
+  epochs: 10
+  lr: 0.001
+  weight_decay: 0.0
+  mixed_precision: true
+  grad_clip_norm: 1.0
+  log_every: 10
+  checkpoint_dir: "checkpoints"
+  checkpoint_name: "latest.pt"
+  save_every_epochs: 1
+
+eval:
+  output_dir: "checkpoints"
+  save_visualizations: true
+  max_visualizations: 20
+  pro:
+    num_thresholds: 50
+    fpr_limit: 0.3
