@@ -98,7 +98,8 @@ class AnomalyModel(nn.Module):
         patch_map = torch.zeros((x.shape[0], 1, h, w), device=x.device)
         patch_score = torch.zeros((x.shape[0],), device=x.device)
         if self.cfg.use_patchcore:
-            patch_map, patch_score = self.patchcore.score(self.backbone, x, out_size_hw=(h, w))
+            if self.patchcore.is_fitted:
+                patch_map, patch_score = self.patchcore.score(self.backbone, x, out_size_hw=(h, w))
 
         recon = torch.zeros_like(x)
         recon_map = torch.zeros((x.shape[0], 1, h, w), device=x.device)

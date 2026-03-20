@@ -199,6 +199,7 @@ class WaferDataset(Dataset[Dict[str, Any]]):
         out: Dict[str, Any] = {
             "image": image,
             "label": int(sample.label),
+            "path": sample.image_path,
         }
         if mask is None:
             out["mask"] = torch.zeros((1, image.shape[-2], image.shape[-1]), dtype=image.dtype)

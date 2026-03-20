@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional, Tuple
+from typing import Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -16,6 +16,49 @@ class DataTransformConfig:
     random_rotate90: bool = True
     hflip_prob: float = 0.5
     vflip_prob: float = 0.5
+
+
+@dataclass(frozen=True)
+class WaferTransform:
+    cfg: DataTransformConfig
+    mode: str
+
+    def __post_init__(self) -> None:
+        if self.mode not in ("train", "test"):
+            raise ValueError(f"mode must be 'train' or 'test', got {self.mode!r}")
+
+    def __call__(self, image: torch.Tensor, mask: Optional[torch.Tensor]) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        cfg = self.cfg
+        mode = self.mode
+
+        image = _ensure_chw_float(image)
+        if mask is not None:
+            mask = _ensure_chw_float(mask)
+            if mask.shape[0] != 1:
+                mask = mask[:1]
+
+        if mode == "train" and cfg.augment:
+            if cfg.random_rotate90:
+                k = int(torch.randint(low=0, high=4, size=(1,)).item())
+                if k:
+                    image = torch.rot90(image, k, dims=(1, 2))
+                    if mask is not None:
+                        mask = torch.rot90(mask, k, dims=(1, 2))
+            if cfg.hflip_prob > 0 and torch.rand(()) < cfg.hflip_prob:
+                image = torch.flip(image, dims=(2,))
+                if mask is not None:
+                    mask = torch.flip(mask, dims=(2,))
+            if cfg.vflip_prob > 0 and torch.rand(()) < cfg.vflip_prob:
+                image = torch.flip(image, dims=(1,))
+                if mask is not None:
+                    mask = torch.flip(mask, dims=(1,))
+
+        image = _resize_chw(image, cfg.image_size, mode="bilinear")
+        if mask is not None:
+            mask = _resize_chw(mask, cfg.image_size, mode="nearest")
+
+        image = _normalize(image, cfg.mean, cfg.std)
+        return image, mask
 
 
 def _ensure_chw_float(x: torch.Tensor) -> torch.Tensor:
@@ -54,38 +97,5 @@ def _normalize(x: torch.Tensor, mean: Tuple[float, ...], std: Tuple[float, ...])
 def build_transforms(
     cfg: DataTransformConfig,
     mode: str,
-) -> Callable[[torch.Tensor, Optional[torch.Tensor]], tuple[torch.Tensor, Optional[torch.Tensor]]]:
-    if mode not in ("train", "test"):
-        raise ValueError(f"mode must be 'train' or 'test', got {mode!r}")
-
-    def _apply(image: torch.Tensor, mask: Optional[torch.Tensor]) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
-        image = _ensure_chw_float(image)
-        if mask is not None:
-            mask = _ensure_chw_float(mask)
-            if mask.shape[0] != 1:
-                mask = mask[:1]
-
-        if mode == "train" and cfg.augment:
-            if cfg.random_rotate90:
-                k = int(torch.randint(low=0, high=4, size=(1,)).item())
-                if k:
-                    image = torch.rot90(image, k, dims=(1, 2))
-                    if mask is not None:
-                        mask = torch.rot90(mask, k, dims=(1, 2))
-            if cfg.hflip_prob > 0 and torch.rand(()) < cfg.hflip_prob:
-                image = torch.flip(image, dims=(2,))
-                if mask is not None:
-                    mask = torch.flip(mask, dims=(2,))
-            if cfg.vflip_prob > 0 and torch.rand(()) < cfg.vflip_prob:
-                image = torch.flip(image, dims=(1,))
-                if mask is not None:
-                    mask = torch.flip(mask, dims=(1,))
-
-        image = _resize_chw(image, cfg.image_size, mode="bilinear")
-        if mask is not None:
-            mask = _resize_chw(mask, cfg.image_size, mode="nearest")
-
-        image = _normalize(image, cfg.mean, cfg.std)
-        return image, mask
-
-    return _apply
+) -> WaferTransform:
+    return WaferTransform(cfg=cfg, mode=mode)

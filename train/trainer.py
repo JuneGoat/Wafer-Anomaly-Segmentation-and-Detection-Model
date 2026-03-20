@@ -116,7 +116,12 @@ class Trainer:
             start_epoch = load_checkpoint(ckpt_path, model=model, optimizer=optimizer, map_location=device)
             self.logger.info(f"Resumed from {ckpt_path} at epoch {start_epoch}")
 
-        scaler = torch.cuda.amp.GradScaler(enabled=self.cfg.mixed_precision and device.type == "cuda")
+        if hasattr(torch, "amp") and hasattr(torch.amp, "GradScaler"):
+            scaler = torch.amp.GradScaler("cuda", enabled=self.cfg.mixed_precision and device.type == "cuda")
+            autocast = torch.autocast
+        else:
+            scaler = torch.cuda.amp.GradScaler(enabled=self.cfg.mixed_precision and device.type == "cuda")
+            autocast = torch.cuda.amp.autocast
         loss_fn = ReconstructionLoss(self.cfg.recon_loss)
 
         if model.autoencoder is not None and optimizer is not None:
@@ -129,7 +134,11 @@ class Trainer:
                 for batch_idx, batch in enumerate(train_loader):
                     x = batch["image"].to(device, non_blocking=True)
                     optimizer.zero_grad(set_to_none=True)
-                    with torch.cuda.amp.autocast(enabled=scaler.is_enabled()):
+                    if autocast is torch.autocast:
+                        ctx = autocast(device_type=device.type, enabled=scaler.is_enabled())
+                    else:
+                        ctx = autocast(enabled=scaler.is_enabled())
+                    with ctx:
                         recon = model.autoencoder(x)
                         loss = loss_fn(recon, x)
                     scaler.scale(loss).backward()

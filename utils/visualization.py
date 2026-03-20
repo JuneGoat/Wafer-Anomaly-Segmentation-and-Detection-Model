@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Iterable, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -75,3 +75,99 @@ def save_anomaly_visualization(
         heat = (amap * 255.0).astype(np.uint8)
         Image.fromarray(img).save(out_path.replace(".png", "_img.png"))
         Image.fromarray(heat).save(out_path.replace(".png", "_map.png"))
+
+
+def save_score_histogram(
+    out_path: str,
+    normal_scores: Sequence[float],
+    anomaly_scores: Sequence[float],
+    title: str = "image score distribution",
+    bins: int = 50,
+) -> None:
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        n = np.asarray(normal_scores, dtype=np.float32)
+        a = np.asarray(anomaly_scores, dtype=np.float32)
+        fig = plt.figure(figsize=(7, 4))
+        ax = fig.add_subplot(1, 1, 1)
+        if len(n) > 0:
+            ax.hist(n, bins=bins, alpha=0.6, label=f"normal (n={len(n)})")
+        if len(a) > 0:
+            ax.hist(a, bins=bins, alpha=0.6, label=f"anomaly (n={len(a)})")
+        ax.set_title(title)
+        ax.set_xlabel("score")
+        ax.set_ylabel("count")
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig(out_path, dpi=150)
+        plt.close(fig)
+    except Exception:
+        pass
+
+
+def save_curve_plot(
+    out_path: str,
+    x: Sequence[float],
+    y: Sequence[float],
+    x_label: str,
+    y_label: str,
+    title: str,
+    extra_lines: Optional[Sequence[Tuple[Sequence[float], Sequence[float], str]]] = None,
+) -> None:
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig = plt.figure(figsize=(6, 5))
+        ax = fig.add_subplot(1, 1, 1)
+        ax.plot(np.asarray(x), np.asarray(y), label=title)
+        if extra_lines:
+            for xx, yy, lab in extra_lines:
+                ax.plot(np.asarray(xx), np.asarray(yy), label=lab)
+        ax.set_title(title)
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
+        ax.grid(True, linestyle="--", alpha=0.3)
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig(out_path, dpi=150)
+        plt.close(fig)
+    except Exception:
+        pass
+
+
+def save_topk_table(
+    out_path: str,
+    rows: Sequence[dict],
+    columns: Sequence[str],
+    title: str,
+) -> None:
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        cell_text = []
+        for r in rows:
+            cell_text.append([str(r.get(c, "")) for c in columns])
+
+        fig = plt.figure(figsize=(10, max(2, 0.35 * (len(rows) + 1))))
+        ax = fig.add_subplot(1, 1, 1)
+        ax.axis("off")
+        ax.set_title(title)
+        tbl = ax.table(cellText=cell_text, colLabels=list(columns), loc="center")
+        tbl.auto_set_font_size(False)
+        tbl.set_fontsize(8)
+        tbl.scale(1, 1.2)
+        fig.tight_layout()
+        fig.savefig(out_path, dpi=150)
+        plt.close(fig)
+    except Exception:
+        pass

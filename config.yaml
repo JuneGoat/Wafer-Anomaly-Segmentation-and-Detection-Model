@@ -46,6 +46,8 @@ eval:
   output_dir: "checkpoints"
   save_visualizations: true
   max_visualizations: 20
+  save_analysis: true
+  topk: 50
   pro:
     num_thresholds: 50
     fpr_limit: 0.3

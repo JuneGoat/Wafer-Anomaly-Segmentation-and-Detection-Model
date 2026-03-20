@@ -39,11 +39,13 @@ class ConvAutoencoder(nn.Module):
 
         enc: list[nn.Module] = []
         pools: list[nn.Module] = []
+        skip_channels: list[int] = []
         ch_in = cfg.in_channels
         ch = cfg.base_channels
         for _ in range(cfg.num_down):
             enc.append(_ConvBlock(ch_in, ch))
             pools.append(nn.MaxPool2d(kernel_size=2, stride=2))
+            skip_channels.append(ch)
             ch_in = ch
             ch *= 2
         self.encoder_blocks = nn.ModuleList(enc)
@@ -54,10 +56,11 @@ class ConvAutoencoder(nn.Module):
         dec_up: list[nn.Module] = []
         dec_blocks: list[nn.Module] = []
         ch = ch_in
-        for _ in range(cfg.num_down):
-            dec_up.append(nn.ConvTranspose2d(ch, ch // 2, kernel_size=2, stride=2))
-            dec_blocks.append(_ConvBlock(ch, ch // 2))
-            ch = ch // 2
+        for skip_ch in reversed(skip_channels):
+            up_out = ch // 2
+            dec_up.append(nn.ConvTranspose2d(ch, up_out, kernel_size=2, stride=2))
+            dec_blocks.append(_ConvBlock(up_out + skip_ch, up_out))
+            ch = up_out
         self.decoder_up = nn.ModuleList(dec_up)
         self.decoder_blocks = nn.ModuleList(dec_blocks)
 

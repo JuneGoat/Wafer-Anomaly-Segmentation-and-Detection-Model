@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,9 +12,9 @@ from torch.utils.data import DataLoader
 
 from model.anomaly_model import AnomalyModel
 from utils.logger import get_logger
-from utils.visualization import save_anomaly_visualization
+from utils.visualization import save_anomaly_visualization, save_curve_plot, save_score_histogram, save_topk_table
 
-from .metrics import PROConfig, best_f1_threshold, dice_iou, pro_score, safe_auroc, summarize_metrics
+from .metrics import PROConfig, best_f1_threshold, dice_iou, pr_points, pro_score, roc_points, safe_auroc, summarize_metrics
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,8 @@ class EvaluatorConfig:
     output_dir: str = "checkpoints"
     save_visualizations: bool = True
     max_visualizations: int = 20
+    save_analysis: bool = True
+    topk: int = 50
     pro: PROConfig = PROConfig()
 
 
@@ -41,26 +44,43 @@ class Evaluator:
 
         y_true: list[int] = []
         y_score: list[float] = []
+        patch_score_list: list[float] = []
+        recon_score_list: list[float] = []
+        paths: list[str] = []
         has_masks = False
         maps: list[np.ndarray] = []
         gts: list[np.ndarray] = []
 
-        vis_dir = Path(self.cfg.output_dir) / "visualizations"
+        analysis_dir = Path(self.cfg.output_dir) / "analysis"
+        analysis_dir.mkdir(parents=True, exist_ok=True)
+        vis_dir = analysis_dir / "visualizations"
         vis_dir.mkdir(parents=True, exist_ok=True)
 
         vis_count = 0
         for batch_idx, batch in enumerate(dataloader):
             x = batch["image"].to(device, non_blocking=True)
             labels = batch["label"]
+            batch_paths = batch.get("path", None)
             masks = batch.get("mask", None)
             has_mask = batch.get("has_mask", None)
 
             pred = model.predict(x)
             amap = pred["anomaly_map"].detach().cpu().numpy()
             iscore = pred["image_score"].detach().cpu().numpy()
+            pscore = pred.get("patch_score", torch.zeros_like(pred["image_score"])).detach().cpu().numpy()
+            rscore = pred.get("recon_score", torch.zeros_like(pred["image_score"])).detach().cpu().numpy()
 
             y_true.extend([int(v) for v in labels])
             y_score.extend([float(v) for v in iscore])
+            patch_score_list.extend([float(v) for v in pscore])
+            recon_score_list.extend([float(v) for v in rscore])
+            if batch_paths is None:
+                paths.extend([f"idx_{len(paths) + i}" for i in range(len(labels))])
+            else:
+                if isinstance(batch_paths, (list, tuple)):
+                    paths.extend([str(p) for p in batch_paths])
+                else:
+                    paths.extend([str(p) for p in list(batch_paths)])
 
             if masks is not None and has_mask is not None:
                 if torch.is_tensor(has_mask):
@@ -148,6 +168,76 @@ class Evaluator:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with open(out_path, "w") as f:
             json.dump(out, f, indent=2)
+
+        if self.cfg.save_analysis:
+            rows = []
+            for i in range(len(y_true)):
+                rows.append(
+                    {
+                        "path": paths[i] if i < len(paths) else f"idx_{i}",
+                        "label": int(y_true[i]),
+                        "image_score": float(y_score[i]),
+                        "patch_score": float(patch_score_list[i]) if i < len(patch_score_list) else 0.0,
+                        "recon_score": float(recon_score_list[i]) if i < len(recon_score_list) else 0.0,
+                    }
+                )
+
+            csv_path = analysis_dir / "per_sample_scores.csv"
+            with open(csv_path, "w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=["path", "label", "image_score", "patch_score", "recon_score"])
+                w.writeheader()
+                w.writerows(rows)
+
+            order = np.argsort(-y_score_np)
+            topk = int(min(self.cfg.topk, len(order)))
+            top_rows = []
+            for j in range(topk):
+                i = int(order[j])
+                top_rows.append(
+                    {
+                        "rank": j + 1,
+                        "label": int(y_true_np[i]),
+                        "image_score": float(y_score_np[i]),
+                        "path": paths[i] if i < len(paths) else f"idx_{i}",
+                    }
+                )
+            save_topk_table(
+                out_path=str(analysis_dir / "topk_by_image_score.png"),
+                rows=top_rows,
+                columns=["rank", "label", "image_score", "path"],
+                title=f"Top-{topk} samples by image_score",
+            )
+
+            normal_scores = [float(y_score[i]) for i in range(len(y_true)) if int(y_true[i]) == 0]
+            anomaly_scores = [float(y_score[i]) for i in range(len(y_true)) if int(y_true[i]) == 1]
+            save_score_histogram(
+                out_path=str(analysis_dir / "image_score_hist.png"),
+                normal_scores=normal_scores,
+                anomaly_scores=anomaly_scores,
+                title="image_score distribution",
+            )
+
+            fpr, tpr, _ = roc_points(y_true_np, y_score_np)
+            save_curve_plot(
+                out_path=str(analysis_dir / "roc_curve.png"),
+                x=fpr.tolist(),
+                y=tpr.tolist(),
+                x_label="FPR",
+                y_label="TPR",
+                title=f"ROC (AUROC={out['image_auroc']:.4f})",
+                extra_lines=[([0.0, 1.0], [0.0, 1.0], "random")],
+            )
+
+            precision, recall, _ = pr_points(y_true_np, y_score_np)
+            ap = float(out.get("image_ap", float("nan")))
+            save_curve_plot(
+                out_path=str(analysis_dir / "pr_curve.png"),
+                x=recall.tolist(),
+                y=precision.tolist(),
+                x_label="Recall",
+                y_label="Precision",
+                title=f"PR (AP={ap:.4f})",
+            )
 
         self.logger.info(f"Evaluation complete. metrics_path={out_path}")
         return out

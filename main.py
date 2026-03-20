@@ -141,6 +141,8 @@ def main() -> None:
         output_dir=str(eval_cfg.get("output_dir", trainer_cfg.checkpoint_dir)),
         save_visualizations=bool(eval_cfg.get("save_visualizations", True)),
         max_visualizations=int(eval_cfg.get("max_visualizations", 20)),
+        save_analysis=bool(eval_cfg.get("save_analysis", True)),
+        topk=int(eval_cfg.get("topk", 50)),
         pro=_to_dataclass(eval_cfg.get("pro", {}), type(EvaluatorConfig().pro)),
     )
     evaluator = Evaluator(evaluator_cfg)

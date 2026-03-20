@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 import numpy as np
-from sklearn.metrics import average_precision_score, precision_recall_curve, roc_auc_score
+from sklearn.metrics import average_precision_score, precision_recall_curve, roc_auc_score, roc_curve
 
 
 def safe_auroc(y_true: np.ndarray, y_score: np.ndarray) -> float:
@@ -27,6 +27,23 @@ def average_precision(y_true: np.ndarray, y_score: np.ndarray) -> float:
     if y_true.min() == y_true.max():
         return float("nan")
     return float(average_precision_score(y_true, y_score))
+
+
+def roc_points(y_true: np.ndarray, y_score: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    y_true = y_true.astype(np.int32)
+    if y_true.min() == y_true.max():
+        fpr = np.asarray([0.0, 1.0], dtype=np.float32)
+        tpr = np.asarray([0.0, 1.0], dtype=np.float32)
+        thr = np.asarray([np.inf, -np.inf], dtype=np.float32)
+        return fpr, tpr, thr
+    fpr, tpr, thr = roc_curve(y_true, y_score.astype(np.float32))
+    return fpr.astype(np.float32), tpr.astype(np.float32), thr.astype(np.float32)
+
+
+def pr_points(y_true: np.ndarray, y_score: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    precision, recall, thresholds = precision_recall_curve(y_true.astype(np.int32), y_score.astype(np.float32))
+    thr = thresholds.astype(np.float32) if len(thresholds) else np.asarray([], dtype=np.float32)
+    return precision.astype(np.float32), recall.astype(np.float32), thr
 
 
 def dice_iou(pred: np.ndarray, gt: np.ndarray) -> Tuple[float, float]:
